@@ -1,0 +1,8 @@
+model: medspada_parallel
+base_epochs: 20
+joint_epochs: 10
+joint_base_lr_factor: 0.1
+windows_per_dataset_per_epoch: 64
+min_train_resolution: 480
+lung_positive_window_prob: 0.5
+amos_positive_window_prob: 0.25
