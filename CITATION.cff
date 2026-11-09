@@ -1,0 +1,10 @@
+cff-version: 1.2.0
+message: "Please cite this software repository when using the implementation."
+title: "MedSpaDA: Spatial-depth adaptation of SAM3 for medical volume segmentation"
+type: software
+authors:
+  - name: "MedSpaDA contributors"
+version: 0.1.0
+date-released: 2026-11-09
+repository-code: "https://github.com/ivel-Li/MedSpaDA"
+url: "https://github.com/ivel-Li/MedSpaDA"
