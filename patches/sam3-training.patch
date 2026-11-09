@@ -1,0 +1,90 @@
+diff --git a/sam3/model/vitdet.py b/sam3/model/vitdet.py
+index f6771a1..98fcf2c 100644
+--- a/sam3/model/vitdet.py
++++ b/sam3/model/vitdet.py
+@@ -68,7 +68,15 @@ class Mlp(nn.Module):
+         self.drop2 = nn.Dropout(drop_probs[1])
+ 
+     def forward(self, x):
+-        x = addmm_act(type(self.act), self.fc1, x)
++        if torch.is_grad_enabled():
++            # Training path: use standard matmul + activation.
++            # The fused addmm_act requires grad to be disabled, which is
++            # incompatible with activation checkpointing (torch.checkpoint
++            # re-enables grad internally even with use_reentrant=False).
++            x = self.act(self.fc1(x))
++        else:
++            # Inference path: fused matmul + activation for performance.
++            x = addmm_act(type(self.act), self.fc1, x)
+         x = self.drop1(x)
+         x = self.norm(x)
+         x = self.fc2(x)
+diff --git a/sam3/train/matcher.py b/sam3/train/matcher.py
+index 5adc6a4..60a7985 100644
+--- a/sam3/train/matcher.py
++++ b/sam3/train/matcher.py
+@@ -535,12 +535,35 @@ class BinaryHungarianMatcherV2(nn.Module):
+         out_score = outputs["pred_logits"].squeeze(-1)  # (B, Q)
+         out_bbox = outputs["pred_boxes"]  # (B, Q, 4))
+ 
++        # SciPy's linear_sum_assignment only reports that its final matrix is
++        # invalid.  Fail earlier with the tensor that first became non-finite,
++        # which is essential for diagnosing long medical post-training runs.
++        for tensor_name, tensor in (
++            ("pred_logits", out_score),
++            ("pred_boxes", out_bbox),
++        ):
++            finite = torch.isfinite(tensor)
++            if not finite.all():
++                bad = int((~finite).sum().item())
++                finite_values = tensor[finite]
++                finite_range = (
++                    (float(finite_values.min()), float(finite_values.max()))
++                    if finite_values.numel()
++                    else (None, None)
++                )
++                raise FloatingPointError(
++                    f"Non-finite {tensor_name} before matching: "
++                    f"bad={bad}/{tensor.numel()}, finite_range={finite_range}"
++                )
++
+         device = out_score.device
+ 
+         num_boxes = batched_targets["num_boxes"].cpu()
+         # Get a padded version of target boxes (as precomputed in the collator).
+         # It should work for both repeat==1 (o2o) and repeat>1 (o2m) matching.
+         tgt_bbox = batched_targets["boxes_padded"]
++        if not torch.isfinite(tgt_bbox).all():
++            raise FloatingPointError("Non-finite target boxes before matching")
+         if self.remove_samples_with_0_gt:
+             # keep only samples w/ at least 1 GT box in targets (num_boxes and tgt_bbox)
+             batch_keep = num_boxes > 0
+@@ -575,6 +598,16 @@ class BinaryHungarianMatcherV2(nn.Module):
+         cost_giou = -generalized_box_iou(
+             box_cxcywh_to_xyxy(out_bbox), box_cxcywh_to_xyxy(tgt_bbox)
+         )
++        for tensor_name, tensor in (
++            ("cost_bbox", cost_bbox),
++            ("cost_giou", cost_giou),
++        ):
++            if not torch.isfinite(tensor).all():
++                bad = int((~torch.isfinite(tensor)).sum().item())
++                raise FloatingPointError(
++                    f"Non-finite {tensor_name} during matching: "
++                    f"bad={bad}/{tensor.numel()}"
++                )
+ 
+         out_prob = self.norm(out_score)
+         if not self.focal:
+@@ -605,6 +638,11 @@ class BinaryHungarianMatcherV2(nn.Module):
+             + self.cost_class * cost_class
+             + self.cost_giou * cost_giou
+         )
++        if not torch.isfinite(C).all():
++            bad = int((~torch.isfinite(C)).sum().item())
++            raise FloatingPointError(
++                f"Non-finite combined matching cost: bad={bad}/{C.numel()}"
++            )
+         # assign a very high cost (1e9) to invalid outputs and targets, so that we can
+         # filter them out (in `_do_matching`) from bipartite matching results
+         do_filtering = out_is_valid is not None or target_is_valid_padded is not None
