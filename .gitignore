@@ -1,0 +1,43 @@
+# Local environments and caches
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.ruff_cache/
+.venv/
+venv/
+*.egg-info/
+build/
+dist/
+.DS_Store
+
+# Never version datasets, model weights, predictions, or experiment state
+data/
+datasets/
+weights/
+checkpoints/
+runs/
+outputs/
+external/
+*.pt
+*.pth
+*.ckpt
+*.safetensors
+*.npz
+*.npy
+*.nii
+*.nii.gz
+*.dcm
+*.h5
+*.hdf5
+*.log
+
+# Credentials and machine-local settings
+.env
+.env.*
+*.pem
+*.key
+*.token
+.secrets/
+.synapseConfig
+.vscode/
+.idea/
